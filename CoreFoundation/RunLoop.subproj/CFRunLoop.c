@@ -1699,6 +1699,7 @@ static void __CFRunLoopAddItemsToCommonMode(const void *value, void *ctx) {
 }
 
 //lihux:对于commonModels中的每一个Model，添加这个item
+//这里的封装还是很巧妙的，利用runtime注册各个类保存的type信息来判断并分发add的是何种item
 static void __CFRunLoopAddItemToCommonModes(const void *value, void *ctx) {
     CFStringRef modeName = (CFStringRef)value;
     CFRunLoopRef rl = (CFRunLoopRef)(((CFTypeRef *)ctx)[0]);
@@ -3620,7 +3621,7 @@ void CFRunLoopAddTimer(CFRunLoopRef rl, CFRunLoopTimerRef rlt, CFStringRef modeN
 void CFRunLoopRemoveTimer(CFRunLoopRef rl, CFRunLoopTimerRef rlt, CFStringRef modeName) {
     CHECK_FOR_FORK();
     __CFRunLoopLock(rl);
-    if (modeName == kCFRunLoopCommonModes) {
+    if (modeName == kCFRunLoopCommonModes) {//如果是common mode，则对标榜为common Mode 的每一个mode，调用删除timer的方法
 	if (NULL != rl->_commonModeItems && CFSetContainsValue(rl->_commonModeItems, rlt)) {
 	    CFSetRef set = rl->_commonModes ? CFSetCreateCopy(kCFAllocatorSystemDefault, rl->_commonModes) : NULL;
 	    CFSetRemoveValue(rl->_commonModeItems, rlt);
@@ -3632,7 +3633,7 @@ void CFRunLoopRemoveTimer(CFRunLoopRef rl, CFRunLoopTimerRef rlt, CFStringRef mo
 	    }
 	} else {
 	}
-    } else {
+    } else {//如果是具体的mode，则直接删除
 	CFRunLoopModeRef rlm = __CFRunLoopFindMode(rl, modeName, false);
         CFIndex idx = kCFNotFound;
         CFMutableArrayRef timerList = NULL;
@@ -3642,11 +3643,11 @@ void CFRunLoopRemoveTimer(CFRunLoopRef rl, CFRunLoopTimerRef rlt, CFStringRef mo
                 idx = CFArrayGetFirstIndexOfValue(timerList, CFRangeMake(0, CFArrayGetCount(timerList)), rlt);
             }
         }
-        if (kCFNotFound != idx) {
+        if (kCFNotFound != idx) {//如果在数组中找到了要删除的timer，对其进行删除操作
             __CFRunLoopTimerLock(rlt);
             CFSetRemoveValue(rlt->_rlModes, rlm->_name);
             if (0 == CFSetGetCount(rlt->_rlModes)) {
-                rlt->_runLoop = NULL;
+                rlt->_runLoop = NULL;//“有借有还，再借不难”，清理timer的runloop、rlModels等信息
             }
             __CFRunLoopTimerUnlock(rlt);
 	    CFArrayRemoveValueAtIndex(timerList, idx);
