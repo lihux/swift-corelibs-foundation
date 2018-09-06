@@ -2379,17 +2379,19 @@ static Boolean __CFRunLoopDoTimers(CFRunLoopRef rl, CFRunLoopModeRef rlm, uint64
     
     Boolean timerHandled = false;
     CFMutableArrayRef timers = NULL;
+    //将runloop model rlm中的timers的没有正在触发中、且过了要触发的时间点的timer添加到临时可变数组timers中，后面对其进行__CFRunLoopDoTimer操作
     for (CFIndex idx = 0, cnt = rlm->_timers ? CFArrayGetCount(rlm->_timers) : 0; idx < cnt; idx++) {
         CFRunLoopTimerRef rlt = (CFRunLoopTimerRef)CFArrayGetValueAtIndex(rlm->_timers, idx);
         
         if (__CFIsValid(rlt) && !__CFRunLoopTimerIsFiring(rlt)) {
-            if (rlt->_fireTSR <= limitTSR) {
+            if (rlt->_fireTSR <= limitTSR) {//还是不是很清楚这个fireTSR是个什么东东,不过从传入的参数mach_absolute_time来看，应该是绝对时间滴答数吧
+                //因此这儿可以理解为：如果这个timer的触发时间达到了，才会去进行触发时间的操作
                 if (!timers) timers = CFArrayCreateMutable(kCFAllocatorSystemDefault, 0, &kCFTypeArrayCallBacks);
                 CFArrayAppendValue(timers, rlt);
             }
         }
     }
-    
+    //这里的timers里都是需要去触发操作的计时器
     for (CFIndex idx = 0, cnt = timers ? CFArrayGetCount(timers) : 0; idx < cnt; idx++) {
         CFRunLoopTimerRef rlt = (CFRunLoopTimerRef)CFArrayGetValueAtIndex(timers, idx);
         Boolean did = __CFRunLoopDoTimer(rl, rlm, rlt);
