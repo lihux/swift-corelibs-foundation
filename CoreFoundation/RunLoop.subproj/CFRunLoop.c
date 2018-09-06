@@ -2066,18 +2066,21 @@ static Boolean __CFRunLoopDoSource1(CFRunLoopRef rl, CFRunLoopModeRef rlm, CFRun
 }
 
 static CFIndex __CFRunLoopInsertionIndexInTimerArray(CFArrayRef array, CFRunLoopTimerRef rlt) __attribute__((noinline));
+
+//lihux:有序数组查找插入位置的典范，时间复杂度log2N，666
 static CFIndex __CFRunLoopInsertionIndexInTimerArray(CFArrayRef array, CFRunLoopTimerRef rlt) {
     CFIndex cnt = CFArrayGetCount(array);
     if (cnt <= 0) {
         return 0;
     }
-    if (256 < cnt) {
+    if (256 < cnt) {//lihux:从下面的实现来看，这段是性能优化代码，如果现有的数组元素个数超过了256(至于为啥是256，鬼知道啊)，可以认为数组比较大了，那么
+        //先直接判断是否应该将timer插入到最开始还是最末尾，命中了，后面就省了一个个的查找了
         CFRunLoopTimerRef item = (CFRunLoopTimerRef)CFArrayGetValueAtIndex(array, cnt - 1);
-        if (item->_fireTSR <= rlt->_fireTSR) {
+        if (item->_fireTSR <= rlt->_fireTSR) {//如果数组最后一个timer的触发时间小于要添加的timer的触发时间，那么显然，插入位置就是在数组的最后
             return cnt;
         }
         item = (CFRunLoopTimerRef)CFArrayGetValueAtIndex(array, 0);
-        if (rlt->_fireTSR < item->_fireTSR) {
+        if (rlt->_fireTSR < item->_fireTSR) {//如果要插入的timer比数组中第一个timer的触发时间还考前，那么显然要插入到最开始的位置
             return 0;
         }
     }
@@ -2085,14 +2088,17 @@ static CFIndex __CFRunLoopInsertionIndexInTimerArray(CFArrayRef array, CFRunLoop
     CFIndex add = (1 << flsl(cnt)) * 2;
     CFIndex idx = 0;
     Boolean lastTestLEQ;
+    //这个查找算法是这样的：idx从0开始，add初始值为数组长度的(count / 2)* 2，这样保证后面add的第一步刚好是数组的最中央
+    //add是每一次查找的跳步的距离，最开始最大，保证能够跳过足够多的位置，
+    //查找的时间复杂度是log2N,好牛逼的查找算法，长度128的数组，最多比较7次，666了老铁
     do {
         add = add / 2;
 	lastTestLEQ = false;
-        CFIndex testIdx = idx + add;
+        CFIndex testIdx = idx + add;//testIdx指的是要比较的timer的位置，第一次取中间的位置
         if (testIdx < cnt) {
             CFRunLoopTimerRef item = (CFRunLoopTimerRef)CFArrayGetValueAtIndex(array, testIdx);
-            if (item->_fireTSR <= rlt->_fireTSR) {
-                idx = testIdx;
+            if (item->_fireTSR <= rlt->_fireTSR) {//如果要插入的timer的触发时间晚于当前的timer的触发时间，则
+                idx = testIdx;//如果发现timer的位置还在比较位置的后面，那么将初始光标移动到当前比较的位置，对后面的值进行比较，否则，缩小间距，继续找前面的比较
 		lastTestLEQ = true;
             }
         }
@@ -3538,6 +3544,9 @@ Boolean CFRunLoopContainsTimer(CFRunLoopRef rl, CFRunLoopTimerRef rlt, CFStringR
     return hasValue;
 }
 
+//lihux:如果是将rlt添加到commonModel,则是一套操作，如果是其他的真正的Model，又是一套操作，前者存在通用Model的set中，同时还要添加到
+//所有声称是commonModel的Model中，后者存在具体某个Model的array中
+//set可以根据hash方法快速的查到要找的元素，而array则不能，这是二者使用的容器的主要区别
 void CFRunLoopAddTimer(CFRunLoopRef rl, CFRunLoopTimerRef rlt, CFStringRef modeName) {    
     CHECK_FOR_FORK();
     if (__CFRunLoopIsDeallocating(rl)) return;
@@ -3560,32 +3569,37 @@ void CFRunLoopAddTimer(CFRunLoopRef rl, CFRunLoopTimerRef rlt, CFStringRef modeN
 	if (NULL != set) {
 	    CFTypeRef context[2] = {rl, rlt};
 	    /* add new item to all common-modes */
+        //将这个计时器添加到所有被标记为common model的Model中，这里巧妙的将rl和rlm通过数组指针的方式传入具体干活的方法__CFRunLoopAddItemToCommonModes中
+        //CFSetApplyFunction这个函数是set提供的一个便利方法， 它将会对set中所有元素，应用传入的函数指针，并附上参数
 	    CFSetApplyFunction(set, (__CFRunLoopAddItemToCommonModes), (void *)context);
 	    CFRelease(set);
 	}
     } else {
-	CFRunLoopModeRef rlm = __CFRunLoopFindMode(rl, modeName, true);
-	if (NULL != rlm) {
-            if (NULL == rlm->_timers) {
+	CFRunLoopModeRef rlm = __CFRunLoopFindMode(rl, modeName, true);//根据modeName查找Model，如果没有找到则创建之
+	if (NULL != rlm) {//如果找到了Model
+            if (NULL == rlm->_timers) {//如果该Model的timers数组刚好为空，则创建一个数组
                 CFArrayCallBacks cb = kCFTypeArrayCallBacks;
                 cb.equal = NULL;
                 rlm->_timers = CFArrayCreateMutable(kCFAllocatorSystemDefault, 0, &cb);
             }
 	}
+    //到这里,如果rlm有值（那么timers也一定非空，且rlt还没有被加入到这个Model中（所以，这里也就意味着你重复将一个timer添加到同一个Model并没什么卵用，啥也不会做）
+    //rlt->rlModels记录了它所有被添加到的models，通过这个来判断是否重复添加timer到同一个Model上
 	if (NULL != rlm && !CFSetContainsValue(rlt->_rlModes, rlm->_name)) {
             __CFRunLoopTimerLock(rlt);
             if (NULL == rlt->_runLoop) {
 		rlt->_runLoop = rl;
-  	    } else if (rl != rlt->_runLoop) {
+  	    } else if (rl != rlt->_runLoop) {//不能将同一个timer添加到不同的runloop中，也就是说，一个timer只能应用于同一个线程上（runloop和线程是一一对应的）,如果你试图将一个
+            //已经添加到了线程A的runloop中的timer添加到线程B的runloop中，其结果是添加失败，啥也不干，直接返回
                 __CFRunLoopTimerUnlock(rlt);
 	        __CFRunLoopModeUnlock(rlm);
                 __CFRunLoopUnlock(rl);
 		return;
 	    }
-  	    CFSetAddValue(rlt->_rlModes, rlm->_name);
+  	    CFSetAddValue(rlt->_rlModes, rlm->_name);//将rlt的Models记录添加当前的mode name，防止重复添加
             __CFRunLoopTimerUnlock(rlt);
             __CFLock(&rl->_timerTSRLock);
-            __CFRepositionTimerInMode(rlm, rlt, false);
+            __CFRepositionTimerInMode(rlm, rlt, false);//是这句话将rlt添加到了rlm中
             __CFUnlock(&rl->_timerTSRLock);
             if (!_CFExecutableLinkedOnOrAfter(CFSystemVersionLion)) {
                 // Normally we don't do this on behalf of clients, but for
