@@ -2101,6 +2101,7 @@ static CFIndex __CFRunLoopInsertionIndexInTimerArray(CFArrayRef array, CFRunLoop
     return lastTestLEQ ? idx + 1 : idx;
 }
 
+//lihux计时器偏差值:就是为了找到rlm的所有不再触发中的计时器中，最早开始时间和最早过期时间
 static void __CFArmNextTimerInMode(CFRunLoopModeRef rlm, CFRunLoopRef rl) {    
     uint64_t nextHardDeadline = UINT64_MAX;
     uint64_t nextSoftDeadline = UINT64_MAX;
@@ -2229,7 +2230,7 @@ static void __CFRepositionTimerInMode(CFRunLoopModeRef rlm, CFRunLoopTimerRef rl
 }
 
 
-// mode and rl are locked on entry and exit
+// mode and rl are locked on entry and exit，这儿我有一个问题：如果不锁定，会有什么问题？
 static Boolean __CFRunLoopDoTimer(CFRunLoopRef rl, CFRunLoopModeRef rlm, CFRunLoopTimerRef rlt) {	/* DOES CALLOUT */
     
     cf_trace(KDEBUG_EVENT_CFRL_TIMERS_FIRING | DBG_FUNC_START, rl, rlm, rlt, 0);
@@ -2241,18 +2242,22 @@ static Boolean __CFRunLoopDoTimer(CFRunLoopRef rl, CFRunLoopModeRef rlm, CFRunLo
     CFRetain(rlt);
     __CFRunLoopTimerLock(rlt);
 
+    //rlt->_fireTSR <= mach_absolute_time()：已经到达timer的触发时间
+    //!__CFRunLoopTimerIsFiring(rlt):timer没有正在触发中
+    //rlt->_runLoop == rl:timer加入的runloop也是传入的runloop
     if (__CFIsValid(rlt) && rlt->_fireTSR <= mach_absolute_time() && !__CFRunLoopTimerIsFiring(rlt) && rlt->_runLoop == rl) {
-        void *context_info = NULL;
-        void (*context_release)(const void *) = NULL;
+        void *context_info = NULL;//一个数据指针
+        void (*context_release)(const void *) = NULL;//一个函数指针
         if (rlt->_context.retain) {
-            context_info = (void *)rlt->_context.retain(rlt->_context.info);
-            context_release = rlt->_context.release;
+            context_info = (void *)rlt->_context.retain(rlt->_context.info);//持有并获取上下文信息
+            context_release = rlt->_context.release;//拿到上下文释放的函数地址
         } else {
             context_info = rlt->_context.info;
         }
         Boolean doInvalidate = (0.0 == rlt->_interval);
-	__CFRunLoopTimerSetFiring(rlt);
+	__CFRunLoopTimerSetFiring(rlt);//设置timer的标记位：“我正在触发操作中，你们后来的人都消停会儿吧，没戏了”
         // Just in case the next timer has exactly the same deadlines as this one, we reset these values so that the arm next timer code can correctly find the next timer in the list and arm the underlying timer.
+        //为了防止下一个计时器的截止时间刚好和当前的完全一致，我们重设了刚柔两个截止时间为一个最大64位整数，从而保证后面能够正确找到下一个触发的计时器
         rlm->_timerSoftDeadline = UINT64_MAX;
         rlm->_timerHardDeadline = UINT64_MAX;
         __CFRunLoopTimerUnlock(rlt);
@@ -2260,29 +2265,31 @@ static Boolean __CFRunLoopDoTimer(CFRunLoopRef rl, CFRunLoopModeRef rlm, CFRunLo
 	oldFireTSR = rlt->_fireTSR;
         __CFUnlock(&rl->_timerTSRLock);
 
-        __CFArmNextTimerInMode(rlm, rl);
+        __CFArmNextTimerInMode(rlm, rl);//找到rlm中余下计时器的最早开始时间和最早过期时间，为下一轮回做准备
 
-	__CFRunLoopModeUnlock(rlm);
-	__CFRunLoopUnlock(rl);
-        CFRunLoopTimerCallBack callout = rlt->_callout;
+	__CFRunLoopModeUnlock(rlm);//其他人可以胡乱操作rlm了
+	__CFRunLoopUnlock(rl);//其他人可以胡乱操作rl了
+        CFRunLoopTimerCallBack callout = rlt->_callout;//闹钟响了，你要起床了，或者你要去上课了，这里的“起床”和“上课”，都是这个⏰响起的时候你计划要做的事情，恩，就是这么个意思
         cf_trace(KDEBUG_EVENT_CFRL_IS_CALLING_TIMER | DBG_FUNC_START, callout, rlt, context_info, 0);
-	__CFRUNLOOP_IS_CALLING_OUT_TO_A_TIMER_CALLBACK_FUNCTION__(callout, rlt, context_info);
+        //__CFRUNLOOP_IS_CALLING_OUT_TO_A_TIMER_CALLBACK_FUNCTION__的实现很简单，就是判断这个函数指针如果不为空，调用它！
+        //其他的诸如__CFRUNLOOP_IS_CALLING_OUT_TO_A_BLOCK__、__CFRUNLOOP_IS_CALLING_OUT_TO_AN_OBSERVER_CALLBACK_FUNCTION__都是类似的套路，唯一不同的是函数传参个数不同而已
+	__CFRUNLOOP_IS_CALLING_OUT_TO_A_TIMER_CALLBACK_FUNCTION__(callout, rlt, context_info);//callout本质上就是一个c函数指针
         cf_trace(KDEBUG_EVENT_CFRL_IS_CALLING_TIMER | DBG_FUNC_END, callout, rlt, context_info, 0);
         
 	CHECK_FOR_FORK();
-        if (doInvalidate) {
+        if (doInvalidate) {//稍后分解
             CFRunLoopTimerInvalidate(rlt);      /* DOES CALLOUT */
         }
         if (context_release) {
             context_release(context_info);
         }
-	__CFRunLoopLock(rl);
+	__CFRunLoopLock(rl);//rlt属于一个rlm,rlm属于一个rl,所以都要锁住，然后设置rlt的正在触发的标志位为flase，活儿干完了，可以休息着了
 	__CFRunLoopModeLock(rlm);
         __CFRunLoopTimerLock(rlt);
 	timerHandled = true;
 	__CFRunLoopTimerUnsetFiring(rlt);
     }
-    if (__CFIsValid(rlt) && timerHandled) {
+    if (__CFIsValid(rlt) && timerHandled) {//表示没咋看懂...但这个分支，正常情况下应该是不会走进来
         /* This is just a little bit tricky: we want to support calling
          * CFRunLoopTimerSetNextFireDate() from within the callout and
          * honor that new time here if it is a later date, otherwise
@@ -2361,7 +2368,7 @@ static Boolean __CFRunLoopDoTimer(CFRunLoopRef rl, CFRunLoopModeRef rlm, CFRunLo
                 __CFUnlock(&rl->_timerTSRLock);
             }
         }
-    } else {
+    } else {//大部分情况，应该是直接走到这儿的：简单的解锁rlt
         __CFRunLoopTimerUnlock(rlt);
     }
     CFRelease(rlt);
