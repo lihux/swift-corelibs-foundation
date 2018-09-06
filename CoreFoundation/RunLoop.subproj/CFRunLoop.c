@@ -4124,15 +4124,16 @@ CFTypeID CFRunLoopTimerGetTypeID(void) {
     return __kCFRunLoopTimerTypeID;
 }
 
+//lihux:timer的创建，通过分析这个创建timer的函数，我们可以学习到runtime里直接分配内存、创建类对象的方法，以及初始化内存中各个成员变量的方法，基本上，一切都是数值或者指针
 CFRunLoopTimerRef CFRunLoopTimerCreate(CFAllocatorRef allocator, CFAbsoluteTime fireDate, CFTimeInterval interval, CFOptionFlags flags, CFIndex order, CFRunLoopTimerCallBack callout, CFRunLoopTimerContext *context) {
     CHECK_FOR_FORK();
     if (isnan(interval)) {
         CRSetCrashLogMessage("NaN was used as an interval for a CFRunLoopTimer");
         HALT;
     }
-    CFRunLoopTimerRef memory;
+    CFRunLoopTimerRef memory;//定义了一个timer类型的指针，后面调用runtime的创建示例方法对其进行分配内存，question：这块内存是在栈上还是堆上呢？
     UInt32 size;
-    size = sizeof(struct __CFRunLoopTimer) - sizeof(CFRuntimeBase);
+    size = sizeof(struct __CFRunLoopTimer) - sizeof(CFRuntimeBase);//获取extraBytes，任何一个oc对象的内存布局都是runtimeBase+extraBytes的结构
     memory = (CFRunLoopTimerRef)_CFRuntimeCreateInstance(allocator, CFRunLoopTimerGetTypeID(), size, NULL);
     if (NULL == memory) {
 	return NULL;
