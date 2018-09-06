@@ -1698,6 +1698,7 @@ static void __CFRunLoopAddItemsToCommonMode(const void *value, void *ctx) {
     }
 }
 
+//lihux:对于commonModels中的每一个Model，添加这个item
 static void __CFRunLoopAddItemToCommonModes(const void *value, void *ctx) {
     CFStringRef modeName = (CFStringRef)value;
     CFRunLoopRef rl = (CFRunLoopRef)(((CFTypeRef *)ctx)[0]);

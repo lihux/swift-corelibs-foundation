@@ -50,7 +50,7 @@ typedef CF_OPTIONS(CFOptionFlags, CFRunLoopActivity) {
     kCFRunLoopAllActivities = 0x0FFFFFFFU
 };
 
-CF_EXPORT const CFRunLoopMode kCFRunLoopDefaultMode;
+CF_EXPORT const CFRunLoopMode kCFRunLoopDefaultMode;//lihux:实际上就是一个string
 CF_EXPORT const CFRunLoopMode kCFRunLoopCommonModes;
 
 CF_EXPORT CFTypeID CFRunLoopGetTypeID(void);
