@@ -180,6 +180,10 @@ CF_EXPORT void CFRunLoopTimerGetContext(CFRunLoopTimerRef timer, CFRunLoopTimerC
 
 // Setting a tolerance for a timer allows it to fire later than the scheduled fire date, improving the ability of the system to optimize for increased power savings and responsiveness. The timer may fire at any time between its scheduled fire date and the scheduled fire date plus the tolerance. The timer will not fire before the scheduled fire date. For repeating timers, the next fire date is calculated from the original fire date regardless of tolerance applied at individual fire times, to avoid drift. The default value is zero, which means no additional tolerance is applied. The system reserves the right to apply a small amount of tolerance to certain timers regardless of the value of this property.
 // As the user of the timer, you will have the best idea of what an appropriate tolerance for a timer may be. A general rule of thumb, though, is to set the tolerance to at least 10% of the interval, for a repeating timer. Even a small amount of tolerance will have a significant positive impact on the power usage of your application. The system may put a maximum value of the tolerance.
+//lihux计时器偏差值20180906:上面的话翻译过来就是：在iOS7.0以后，可以并且建议给计时器timer设置一个偏差量，对于重复计数的计时器，建议是10%的间隔时间。同时，对于计时器而言，触发的时机可能会在原计划的时间点到原计划的时间点
+//+偏差值，比如设置的3秒后触发，偏差是0.3秒，那么时机执行的时间是3秒到3.3秒之间，但只会延后，绝不会提前。对于重复计数的计时器，偏差并不会累计，第N次计时器触发是时间是相对于最开始的时间来计算的，这样
+//能够保证偏差不会累计，苹果强烈建议，在满足需求的前提下，设置这个偏差值，能够对设备节能带来相当明显的正面影响。
+//那么下面我们来跟进一下这个偏差值是如何被使用的吧：
 CF_EXPORT CFTimeInterval CFRunLoopTimerGetTolerance(CFRunLoopTimerRef timer) API_AVAILABLE(macos(10.9), ios(7.0), watchos(2.0), tvos(9.0));
 CF_EXPORT void CFRunLoopTimerSetTolerance(CFRunLoopTimerRef timer, CFTimeInterval tolerance) API_AVAILABLE(macos(10.9), ios(7.0), watchos(2.0), tvos(9.0));
 

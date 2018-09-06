@@ -644,7 +644,7 @@ struct __CFRunLoopMode {
     CFMutableDictionaryRef _portToV1SourceMap;
     __CFPortSet _portSet;
     CFIndex _observerMask;
-#if USE_DISPATCH_SOURCE_FOR_TIMERS
+#if USE_DISPATCH_SOURCE_FOR_TIMERS//lihux:dispatch timer和mk_timer应该是二选一的，且iOS中用的是后者
     dispatch_source_t _timerSource;
     dispatch_queue_t _queue;
     Boolean _timerFired; // set to true by the source when a timer has fired
@@ -2109,10 +2109,11 @@ static void __CFArmNextTimerInMode(CFRunLoopModeRef rlm, CFRunLoopRef rl) {
         // Look at the list of timers. We will calculate two TSR values; the next soft and next hard deadline.
         // The next soft deadline is the first time we can fire any timer. This is the fire date of the first timer in our sorted list of timers.
         // The next hard deadline is the last time at which we can fire the timer before we've moved out of the allowable tolerance of the timers in our list.
+        //lihux计时器偏差值:TSR不知道啥意思，thread special ...? 柔性和刚性截止时间分别是所有计时器中最先到达触发时间点的值和计时器中最先达到截止时间点的值
         for (CFIndex idx = 0, cnt = CFArrayGetCount(rlm->_timers); idx < cnt; idx++) {
             CFRunLoopTimerRef t = (CFRunLoopTimerRef)CFArrayGetValueAtIndex(rlm->_timers , idx);
             // discount timers currently firing
-            if (__CFRunLoopTimerIsFiring(t)) continue;
+            if (__CFRunLoopTimerIsFiring(t)) continue;//正在触发的计时器，不算，pass
             
             int32_t err = CHECKINT_NO_ERROR;
             uint64_t oneTimerSoftDeadline = t->_fireTSR;
@@ -2124,15 +2125,16 @@ static void __CFArmNextTimerInMode(CFRunLoopModeRef rlm, CFRunLoopRef rl) {
                 break;
             }
             
-            if (oneTimerSoftDeadline < nextSoftDeadline) {
+            if (oneTimerSoftDeadline < nextSoftDeadline) {//寻找比当前柔性时间更早的时间
                 nextSoftDeadline = oneTimerSoftDeadline;
             }
             
-            if (oneTimerHardDeadline < nextHardDeadline) {
+            if (oneTimerHardDeadline < nextHardDeadline) {//寻找比当前刚性时间更早的时间
                 nextHardDeadline = oneTimerHardDeadline;
             }
-        }
+        }//for循环结束，我们顺利找到了需要的刚柔截止时间
         
+        //如果有必要更新截止时间
         if (nextSoftDeadline < UINT64_MAX && (nextHardDeadline != rlm->_timerHardDeadline || nextSoftDeadline != rlm->_timerSoftDeadline)) {
             if (CFRUNLOOP_NEXT_TIMER_ARMED_ENABLED()) {
                 CFRUNLOOP_NEXT_TIMER_ARMED((unsigned long)(nextSoftDeadline - mach_absolute_time()));
@@ -2144,7 +2146,7 @@ static void __CFArmNextTimerInMode(CFRunLoopModeRef rlm, CFRunLoopRef rl) {
             uint64_t leeway = __CFTSRToNanoseconds(nextHardDeadline - nextSoftDeadline);
             dispatch_time_t deadline = __CFTSRToDispatchTime(nextSoftDeadline);
 #if USE_MK_TIMER_TOO
-            if (leeway > 0) {
+            if (leeway > 0) {//leeway:打个比方，下午两点上课，但是你可以晚5分钟过来，这5分钟的余量就是leeway!
                 // Only use the dispatch timer if we have any leeway
                 // <rdar://problem/14447675>
                 
@@ -2992,7 +2994,7 @@ static int32_t __CFRunLoopRun(CFRunLoopRef rl, CFRunLoopModeRef rlm, CFTimeInter
     }
     
     return retVal;
-}
+}//lihux:__CFRunLoopRun 又臭又长，300多行
 
 CF_BREAKPOINT_FUNCTION(void _CFRunLoopError_RunCalledWithInvalidMode(void));
 
@@ -4348,6 +4350,7 @@ void CFRunLoopTimerSetTolerance(CFRunLoopTimerRef rlt, CFTimeInterval tolerance)
      * delay is set to 'leeway' nanoseconds. For the subsequent timer fires at
      * 'start' + N * 'interval', the upper limit is MIN('leeway','interval'/2).
      */
+    //如果计时器的间隔有值，那么，实际设置的偏差值，最大是间隔的50%.如果没有的话，除了不能小于0，是多少就设置为多少
     if (rlt->_interval > 0) {
         rlt->_tolerance = MIN(tolerance, rlt->_interval / 2);
     } else {
