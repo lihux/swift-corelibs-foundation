@@ -516,10 +516,12 @@ typedef UnsignedWide		AbsoluteTime;
 #if USE_DISPATCH_SOURCE_FOR_TIMERS
 #endif
 #if USE_MK_TIMER_TOO
+//lihux:补充mk_time相关信息：以下mk_timer来自darwin-xnu内核的mk_timer.h文件中，是xnu内核提供的一种计时器
+//链接如下：https://github.com/apple/darwin-xnu/blob/master/osfmk/mach/mk_timer.h
 extern mach_port_name_t mk_timer_create(void);
 extern kern_return_t mk_timer_destroy(mach_port_name_t name);
 extern kern_return_t mk_timer_cancel(mach_port_name_t name, AbsoluteTime *result_time);
-extern kern_return_t mk_timer_arm(mach_port_name_t name, uint64_t expire_time);
+extern kern_return_t mk_timer_arm(mach_port_name_t name, uint64_t expire_time);//开始计时，到达expire_time的时候，触发计时
 #endif
 
 static uint32_t __CFSendTrivialMachMessage(mach_port_t port, uint32_t msg_id, CFOptionFlags options, uint32_t timeout) {
@@ -2154,8 +2156,9 @@ static void __CFArmNextTimerInMode(CFRunLoopModeRef rlm, CFRunLoopRef rl) {
             uint64_t leeway = __CFTSRToNanoseconds(nextHardDeadline - nextSoftDeadline);
             dispatch_time_t deadline = __CFTSRToDispatchTime(nextSoftDeadline);
 #if USE_MK_TIMER_TOO
+            //既有dispatch source又有mk timer的情况下，将视冗余量来决定用哪一个，如果刚柔截止时间差大于0，则使用dispatch source作为计时器触发源，当宽容量为0的时候才使用mk timer,看来后者更精确？
             if (leeway > 0) {//leeway:打个比方，下午两点上课，但是你可以晚5分钟过来，这5分钟的余量就是leeway!
-                // Only use the dispatch timer if we have any leeway
+                // Only use the dispatch timer if we have any leeway,但是为啥呢？
                 // <rdar://problem/14447675>
                 
                 // Cancel the mk timer
@@ -2183,10 +2186,10 @@ static void __CFArmNextTimerInMode(CFRunLoopModeRef rlm, CFRunLoopRef rl) {
                 }
             }
 #else
-            dispatch_source_set_timer(rlm->_timerSource, deadline, DISPATCH_TIME_FOREVER, leeway);
+            dispatch_source_set_timer(rlm->_timerSource, deadline, DISPATCH_TIME_FOREVER, leeway);//只有dispatch source的时候只能采用这个了
 #endif
 #else
-            if (rlm->_timerPort) {
+            if (rlm->_timerPort) { //只有mk timer 的时候，只能使用这个了
                 mk_timer_arm(rlm->_timerPort, nextSoftDeadline);
             }
 #endif
