@@ -2212,6 +2212,9 @@ static void __CFArmNextTimerInMode(CFRunLoopModeRef rlm, CFRunLoopRef rl) {
 
 // call with rlm and its run loop locked, and the TSRLock locked; rlt not locked; returns with same state
 static void __CFRepositionTimerInMode(CFRunLoopModeRef rlm, CFRunLoopTimerRef rlt, Boolean isInArray) __attribute__((noinline));
+
+//lihux:将timer rlt插入到timers数组中，根据其触发时间来决定插入位置，值得注意的是，如果这个timer已经在数组中（这种情况主要出现于重复响起的timer，执行完此次闹钟响之后，
+//下次再响起的时间会向后移动到interval之后），则先要将其冲数组中删掉，以保证数组的真正有序
 static void __CFRepositionTimerInMode(CFRunLoopModeRef rlm, CFRunLoopTimerRef rlt, Boolean isInArray) {
     if (!rlt) return;
     
@@ -2353,7 +2356,7 @@ static Boolean __CFRunLoopDoTimer(CFRunLoopRef rl, CFRunLoopModeRef rlm, CFRunLo
 		    CFRelease(name);
 		}
                 __CFLock(&rl->_timerTSRLock);
-		rlt->_fireTSR = nextFireTSR;
+		rlt->_fireTSR = nextFireTSR;//设置闹钟的下一个响起的时间，因为修改了这个时间，需要重新排一下timers的顺序
                 rlt->_nextFireDate = CFAbsoluteTimeGetCurrent() + __CFTimeIntervalUntilTSR(nextFireTSR);
 		for (CFIndex idx = 0; idx < cnt; idx++) {
 		    CFRunLoopModeRef rlm = (CFRunLoopModeRef)modes[idx];
